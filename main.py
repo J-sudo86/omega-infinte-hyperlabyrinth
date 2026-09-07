@@ -78,21 +78,52 @@ class LightSource:
             self.rays.append(LightRay(self.rect.centerx, self.rect.centery, a + self.ang))
             a += self.step
 
-    def calc(self, walls: list[Wall]):
+    def calc(self, walls):
         self.lines = []
         self.dists = []
+        self.hits = []
+
         for ray in self.rays:
-            min_dist, min_ray = None, None
-            for w in walls:
-                res = ray.collision(w)
-                if res is not None:
-                    cx, cy = res
-                    dist = math.hypot(cx - ray.x, cy - ray.y) * math.cos(ray.ang - self.ang)
-                    if min_dist is None or dist < min_dist:
-                        min_dist = dist
-                        min_ray = res
-            self.lines.append(((ray.x, ray.y), min_ray))
+            min_dist = None
+            min_hit = None
+            min_wall = None
+
+            for wall in walls:
+                hit = ray.collision(wall)
+
+                if hit is None:
+                    continue
+
+                hit_x, hit_y = hit
+
+                raw_distance = math.hypot(
+                    hit_x - ray.x,
+                    hit_y - ray.y
+                )
+
+                # Fish-eye correction
+                corrected_distance = (
+                    raw_distance
+                    * math.cos(ray.ang - self.ang)
+                )
+
+                if (
+                    min_dist is None
+                    or corrected_distance < min_dist
+                ):
+                    min_dist = corrected_distance
+                    min_hit = hit
+                    min_wall = wall
+
+            self.lines.append(
+                (
+                    (ray.x, ray.y),
+                    min_hit
+                )
+            )
+
             self.dists.append(min_dist)
+            self.hits.append((min_hit, min_wall))
 
     def draw(self):
         for i, (xy1, xy2) in enumerate(self.lines):
@@ -101,6 +132,7 @@ class LightSource:
             else:
                 self.rays[i].draw()
         pygame.draw.rect(window, "white", self.rect)
+
 
 
 def clamp(a, l, h):
@@ -128,7 +160,10 @@ def random_walls(n: int):
         ))
     return ret
 
-wall_texture = pygame.image.load("wall_texture.png")
+wall_texture = pygame.image.load("wall_texture2.png")
+pygame.init()
+
+
 
 window = pygame.display.set_mode((1000, 500), pygame.DOUBLEBUF, 32)
 clock = pygame.time.Clock()
@@ -145,6 +180,10 @@ down = [False, False, False, False]
 last_frame = 0
 
 while loop:
+    dt = clock.tick(60) / 1000.0
+
+    # Prevent huge movement if the game freezes
+    dt = min(dt, 0.05)
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             loop = False
@@ -172,15 +211,91 @@ while loop:
     for j, d in enumerate(src.dists):
         if d is None:
             continue
-        colour = 255 - mapval(d ** 2, 0, 500 ** 2, 0, 255)
-        width = 500 / len(src.dists) + 1
-        height = 500 - d
-        posx = 500 + (j * width) - (width / 2)
+
+        hit, wall = src.hits[j]
+
+        if hit is None or wall is None:
+            continue
+
+        # -----------------------------------------------------
+        # Find where along the wall we hit
+        # -----------------------------------------------------
+
+        wall_dx = wall.x2 - wall.x1
+        wall_dy = wall.y2 - wall.y1
+
+        wall_length_sq = wall_dx ** 2 + wall_dy ** 2
+
+        if wall_length_sq == 0:
+            continue
+
+        wall_pos = (
+            (hit[0] - wall.x1) * wall_dx +
+            (hit[1] - wall.y1) * wall_dy
+        ) / wall_length_sq
+
+        wall_pos = clamp(wall_pos, 0, 1)
+
+        # Convert wall position into texture X coordinate
+        tex_x = int(wall_pos * (wall_texture.get_width() - 1))
+
+        # -----------------------------------------------------
+        # Perspective wall height
+        # -----------------------------------------------------
+
+        height = 1400 / max(d, 0.001)
+
+        # Don't let walls become ridiculously huge
+        height = min(height, 1000)
+
+        width = 500 / len(src.dists)
+
+        posx = 500 + j * width
         posy = 250 - height / 2
-        pygame.draw.rect(window, (colour, colour, colour), (posx, posy, width + 1, height))
+
+        # -----------------------------------------------------
+        # Distance shading
+        # -----------------------------------------------------
+
+        shade = 255 - mapval(
+            d ** 2,
+            0,
+            500 ** 2,
+            0,
+            200
+        )
+
+        shade = int(clamp(shade, 40, 255))
+
+        # -----------------------------------------------------
+        # Grab one vertical column from the wall texture
+        # -----------------------------------------------------
+
+        tex_column = wall_texture.subsurface(
+            (tex_x, 0, 1, wall_texture.get_height())
+        )
+
+        tex_column = pygame.transform.scale(
+            tex_column,
+            (
+                max(1, int(width + 1)),
+                max(1, int(height))
+            )
+        )
+
+        # Apply distance lighting
+        tex_column = tex_column.copy()
+        tex_column.fill(
+            (shade, shade, shade),
+            special_flags=pygame.BLEND_RGB_MULT
+        )
+
+        window.blit(
+            tex_column,
+            (int(posx), int(posy))
+        )
 
     show_message(str(round(1 / (time.time() - last_frame))) + " FPS", 50, 25, "white")
     last_frame = time.time()
 
     pygame.display.update()
-    dt = clock.tick(60) / 1000
