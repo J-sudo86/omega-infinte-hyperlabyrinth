@@ -6,6 +6,7 @@ import keyboard
 
 colors = ["red", "blue", "green", "white", "purple", "orange", "cyan", "yellow"]
 
+DASH_COOLDOWN = 10
 
 class Wall:
     def __init__(self, x1: float, y1: float, x2: float, y2: float):
@@ -55,10 +56,13 @@ class LightSource:
         self.hits = []
         self.rect = pygame.Rect(0, 0, 10, 10)
         self.rect.center = (x, y)
+        self.dash_timer = 0
         self.update_rays()
 
     def move(self, dx: int):
         global wlst
+        if self.dash_timer > 0:
+            return
         self.rect.move_ip(math.cos(self.ang) * dx, math.sin(self.ang) * dx)
         self.rect.centerx = clamp(self.rect.centerx, 0, 500)
         self.rect.centery = clamp(self.rect.centery, 0, 500)
@@ -67,11 +71,18 @@ class LightSource:
                 self.rect.move_ip(-math.cos(self.ang) * dx, -math.sin(self.ang) * dx)
                 print(f"Collision detected: {self.rect.x, self.rect.y}")
 
+    def dash(self):
+        if self.dash_timer > 0:
+            return
+        self.dash_timer = DASH_COOLDOWN
 
     def rotate(self, da: float):
         self.ang += da                                   
 
     def update_rays(self):
+        if self.dash_timer > 0:
+            self.dash_timer -= 1
+            self.rect.move_ip(math.cos(self.ang) * 1000 * dt, math.sin(self.ang) * 1000 * dt)
         self.rays = []
         a = -self.fov / 2
         while a < self.fov / 2:
@@ -198,6 +209,11 @@ while loop:
         src.rotate(-0.05)
     if keyboard.is_pressed("d"):
         src.rotate(0.05)
+    if not keyboard.is_pressed("shift"):
+        SHIFT_PRESSED = True
+    if keyboard.is_pressed("shift") and SHIFT_PRESSED:
+        SHIFT_PRESSED = False
+        src.dash()
 
     window.fill((0, 0, 0))
 
