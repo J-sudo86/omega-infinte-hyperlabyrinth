@@ -57,18 +57,24 @@ class LightSource:
         self.rect = pygame.Rect(0, 0, 10, 10)
         self.rect.center = (x, y)
         self.dash_timer = 0
+        self.speed = 0
         self.update_rays()
+    
+    def accel(self, dx: float):
+        self.speed += dx
 
-    def move(self, dx: int):
+    def move(self, dt: float):
+        self.speed *= .8
         global wlst
         if self.dash_timer > 0:
             return
-        self.rect.move_ip(math.cos(self.ang) * dx, math.sin(self.ang) * dx)
+        self.rect.move_ip(math.cos(self.ang) * self.speed * dt, math.sin(self.ang) * self.speed * dt)
         self.rect.centerx = clamp(self.rect.centerx, 0, 500)
         self.rect.centery = clamp(self.rect.centery, 0, 500)
         for line in wlst:
             if self.rect.clipline(line.x1, line.y1, line.x2, line.y2):
-                self.rect.move_ip(-math.cos(self.ang) * dx, -math.sin(self.ang) * dx)
+                self.rect.move_ip(-math.cos(self.ang) * self.speed * dt, -math.sin(self.ang) * self.speed * dt)
+                self.speed = 0
                 print(f"Collision detected: {self.rect.x, self.rect.y}")
 
     def dash(self):
@@ -83,7 +89,7 @@ class LightSource:
     def update_rays(self):
         if self.dash_timer > 0:
             self.dash_timer -= 1
-            self.rect.move_ip(math.cos(self.ang) * 600 * dt, math.sin(self.ang) * 600 * dt)
+            self.rect.move_ip(math.cos(self.ang) * [500, 600, 700, 800, 900, 900, 800, 700, 600, 500][math.floor(self.dash_timer / 3)] * dt, math.sin(self.ang) * [500, 600, 700, 800, 900, 900, 800, 700, 600, 500][math.floor(self.dash_timer / 3)] * dt)
             self.rect.centerx = clamp(self.rect.centerx, 0, 500)
             self.rect.centery = clamp(self.rect.centery, 0, 500)
         self.rays = []
@@ -148,6 +154,149 @@ class LightSource:
         pygame.draw.rect(window, "white", self.rect)
 
 
+class Projectile:
+    def __init__(self, x, y, angle, image_path, width, height, speed):
+        self.x = x
+        self.y = y
+        self.angle = angle
+        self.speed = speed
+        self.alive = True
+
+        self.image = pygame.image.load(image_path).convert_alpha()
+        self.image = pygame.transform.scale(self.image, (width, height))
+
+    def update(self, dt, walls):
+        if not self.alive:
+            return
+
+        old_x = self.x
+        old_y = self.y
+
+        self.x += math.cos(self.angle) * self.speed * dt
+        self.y += math.sin(self.angle) * self.speed * dt
+
+        # Check collision with walls
+        bullet_rect = pygame.Rect(
+            int(self.x - 3),
+            int(self.y - 3),
+            6,
+            6
+        )
+
+        for wall in walls:
+            if bullet_rect.clipline(
+                wall.x1, wall.y1,
+                wall.x2, wall.y2
+            ):
+                self.alive = False
+                return
+
+        # Remove if outside map
+        if (
+            self.x < 0 or self.x > 500 or
+            self.y < 0 or self.y > 500
+        ):
+            self.alive = False
+
+    def distance_from_player(self, player):
+        return math.hypot(
+            self.x - player.rect.centerx,
+            self.y - player.rect.centery
+        )
+    def draw_2d(self):
+        if not self.alive:
+            return
+
+        rect = self.image.get_rect(
+            center=(int(self.x), int(self.y))
+        )
+
+        window.blit(self.image, rect)
+
+    def render_3d(self, player):
+        if not self.alive:
+            return
+
+        dx = self.x - player.rect.centerx
+        dy = self.y - player.rect.centery
+
+        distance = math.hypot(dx, dy)
+
+        if distance <= 1:
+            return
+
+        # Angle from player to bullet
+        bullet_angle = math.atan2(dy, dx)
+
+        # Difference between where player is looking
+        # and where the bullet is
+        angle_diff = bullet_angle - player.ang
+
+        # Keep angle between -PI and PI
+        angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
+
+        # Don't render bullets behind the player
+        if abs(angle_diff) > player.fov / 2:
+            return
+
+        # ---------------------------------------------
+        # Convert angle to screen X
+        # ---------------------------------------------
+
+        screen_x = (
+            500 +
+            (angle_diff / player.fov + 0.5) * 500
+        )
+
+        # ---------------------------------------------
+        # Perspective size
+        # ---------------------------------------------
+
+        size = 300 / max(distance, 1)
+
+        # Don't let it become ridiculously huge
+        size = clamp(size, 4, 150)
+
+        # ---------------------------------------------
+        # Find which ray column this bullet is in
+        # ---------------------------------------------
+
+        ray_index = int(
+            (angle_diff + player.fov / 2)
+            / player.fov
+            * len(player.dists)
+        )
+
+        if ray_index < 0 or ray_index >= len(player.dists):
+            return
+
+        # ---------------------------------------------
+        # Don't render bullet through walls
+        # ---------------------------------------------
+
+        wall_distance = player.dists[ray_index]
+
+        if wall_distance is not None and distance > wall_distance:
+            return
+
+        # ---------------------------------------------
+        # Draw bullet
+        # ---------------------------------------------
+
+        bullet = pygame.transform.scale(
+            self.image,
+            (int(size), int(size))
+        )
+
+        rect = bullet.get_rect(
+            center=(
+                int(screen_x),
+                250
+            )
+        )
+
+        window.blit(bullet, rect)
+
 
 def clamp(a, l, h):
     return min(max(a, l), h)
@@ -190,6 +339,10 @@ loop = True
 src = LightSource(250, 250, 1.5 * math.pi)
 wlst = random_walls(5)
 
+projectiles = []
+shoot_cooldowns = [0, 0]
+
+
 down = [False, False, False, False]
 last_frame = 0
 
@@ -203,11 +356,11 @@ while loop:
             loop = False
             break
     
-
+    
     if keyboard.is_pressed("w"):
-        src.move(100 * dt)
+        src.accel(50)
     if keyboard.is_pressed("s"):
-        src.move(-100 * dt)
+        src.accel(-50)
     if keyboard.is_pressed("a"):
         src.rotate(-0.05)
     if keyboard.is_pressed("d"):
@@ -217,11 +370,54 @@ while loop:
     if keyboard.is_pressed("shift") and SHIFT_PRESSED:
         SHIFT_PRESSED = False
         src.dash()
+    shoot_cooldowns[0] -= dt
+    shoot_cooldowns[1] -= dt
+
+    if keyboard.is_pressed("space") and shoot_cooldowns[0] <= 0:
+        projectiles.append(
+            Projectile(
+                src.rect.centerx,
+                src.rect.centery,
+                src.ang,
+                "bullet.png",
+                6,
+                6,
+                200
+            )
+        )
+        shoot_cooldowns[0] = .4
+    if keyboard.is_pressed("ctrl") and shoot_cooldowns[1] <= 0:
+        projectiles.append(
+            Projectile(
+                src.rect.centerx,
+                src.rect.centery,
+                src.ang,
+                "bullet2.png",
+                12,
+                12,
+                50
+            )
+        )
+        shoot_cooldowns[1] = 1
 
     window.fill((0, 0, 0))
+    src.move(dt)
+
+    for projectile in projectiles:
+        projectile.update(dt, wlst)
+
+    projectiles = [
+        projectile for projectile in projectiles
+        if projectile.alive
+    ]
+
+    
 
     for wl in wlst:
         wl.draw()
+
+ 
+
 
     src.update_rays()
     src.calc(wlst)
@@ -313,6 +509,12 @@ while loop:
             tex_column,
             (int(posx), int(posy))
         )
+    # Draw projectiles on the 2D map
+    for projectile in projectiles:
+        projectile.draw_2d()
+    for projectile in projectiles:
+        projectile.render_3d(src)
+
 
     show_message(str(round(1 / (time.time() - last_frame))) + " FPS", 50, 25, "white")
     last_frame = time.time()
