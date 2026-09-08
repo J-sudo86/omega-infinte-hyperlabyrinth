@@ -6,7 +6,7 @@ import keyboard
 
 colors = ["red", "blue", "green", "white", "purple", "orange", "cyan", "yellow"]
 
-DASH_COOLDOWN = 10
+DASH_COOLDOWN = 30
 
 class Wall:
     def __init__(self, x1: float, y1: float, x2: float, y2: float):
@@ -74,6 +74,7 @@ class LightSource:
     def dash(self):
         if self.dash_timer > 0:
             return
+        
         self.dash_timer = DASH_COOLDOWN
 
     def rotate(self, da: float):
@@ -82,7 +83,9 @@ class LightSource:
     def update_rays(self):
         if self.dash_timer > 0:
             self.dash_timer -= 1
-            self.rect.move_ip(math.cos(self.ang) * 1000 * dt, math.sin(self.ang) * 1000 * dt)
+            self.rect.move_ip(math.cos(self.ang) * 600 * dt, math.sin(self.ang) * 600 * dt)
+            self.rect.centerx = clamp(self.rect.centerx, 0, 500)
+            self.rect.centery = clamp(self.rect.centery, 0, 500)
         self.rays = []
         a = -self.fov / 2
         while a < self.fov / 2:
