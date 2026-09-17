@@ -9,7 +9,7 @@ A cleaned-up multi-file version of the original Pygame ray-casting game.
 - Projectiles stop at walls before they can hit enemies behind them.
 - Explosions use line-of-sight checks, so blast damage does not pass through walls.
 - Player, dash, enemy, projectile and ray-casting code are split into modules.
-- No external image assets are required; visuals are drawn by Pygame.
+- The `images/` directory is reserved for player image assets.
 
 ## Run
 ```bash
@@ -17,4 +17,4 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Controls: W/S move, A/D turn, Space dash, left mouse/1 small shot, right mouse/2 big explosive shot, R reload.
+Controls: W/S move, A/D turn, Space dash, 1/2 select small/big weapon, left mouse fires the selected weapon, R reload. The game window can be resized.

@@ -3,11 +3,13 @@ from core.geometry import line_of_sight
 from settings import *
 
 class Explosion:
-    def __init__(self,x,y):self.x=x;self.y=y;self.radius=4;self.max_radius=105;self.life=.42;self.hit=set()
+    def __init__(self,x,y):
+        self.x=x;self.y=y;self.radius=4;self.max_radius=105;self.life=.42;self.total_life=.42;self.hit=set()
     @property
-    def alive(self):return self.life>0
+    def alive(self):
+        return self.life > 0
     def update(self,dt,enemies,player,walls):
-        self.life-=dt; self.radius=self.max_radius*(1-self.life/.42)
+        self.life-=dt; self.radius=self.max_radius*(1-self.life/self.total_life)
         for e in enemies:
             if e.alive and id(e) not in self.hit and math.hypot(self.x-e.x,self.y-e.y)<=self.radius and line_of_sight((self.x,self.y),e.pos,walls):
                 e.hit(30);self.hit.add(id(e))

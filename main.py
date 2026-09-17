@@ -5,29 +5,41 @@ from systems.pathfinding import AStarGrid
 from systems.raycast import Raycaster
 from entities.projectile import Projectile
 from entities.explosion import Explosion
-from ui import menu, hud, text
+from entities.shrapnel import Shrapnel
+from ui import menu, hud, text, viewmodel
 
-pygame.init(); screen=pygame.display.set_mode((WIDTH,HEIGHT)); pygame.display.set_caption('Rayfall - A* Edition'); clock=pygame.time.Clock()
+pygame.init(); screen=pygame.display.set_mode((WIDTH,HEIGHT),pygame.RESIZABLE); pygame.display.set_caption('Rayfall - A* Edition'); clock=pygame.time.Clock()
 levels=load_levels(); state='menu'; selected=0; level_idx=0
-player=walls=enemies=pathfinder=None; projectiles=[]; explosions=[]; ammo=[12,4]; reload_timer=0; fire_cd=[0,0]
+player=walls=enemies=pathfinder=None; projectiles=[]; explosions=[]; shrapnel=[]; ammo=[12,4]; reload_timer=0; fire_cd=[0,0]; selected_weapon=0; viewmodel_phase=0
 
 def start_level(idx):
-    global level_idx,player,walls,enemies,pathfinder,projectiles,explosions,ammo,reload_timer,fire_cd
+    global level_idx,player,walls,enemies,pathfinder,projectiles,explosions,shrapnel,ammo,reload_timer,fire_cd
     level_idx=idx; player,walls,enemies=Level(levels[idx]).build(); pathfinder=AStarGrid(WORLD_W,WORLD_H,20,walls,12)
-    projectiles=[];explosions=[];ammo=[12,4];reload_timer=0;fire_cd=[0,0]
+    projectiles=[];explosions=[];shrapnel=[];ammo=[12,4];reload_timer=0;fire_cd=[0,0]
 
-def fire(big=False):
+def has_ammo(slot):
     global ammo
-    slot=1 if big else 0
+    return ammo[slot] > 0
+
+def fire(slot): # eventually put ammo as property of player class
+    global ammo
+    if slot == "dash":
+        for number, bullet in enumerate(ammo):
+            ammo[number] = math.floor(bullet * 0.5)
+        return
     if ammo[slot]<=0 or fire_cd[slot]>0 or reload_timer>0:return
-    ammo[slot]-=1;fire_cd[slot]=.42 if big else .16
-    projectiles.append(Projectile(player.x,player.y,player.angle,260 if big else 430,0 if big else 12,big))
+    ammo[slot] -= 1
+    fire_cd[slot]=.42 if slot else .16
+    projectiles.append(Projectile(player.x,player.y,player.angle,260 if slot else 430,0 if slot else 12,slot!=0))
 
 running=True
 while running:
     dt=min(clock.tick(FPS)/1000,.05)
     for ev in pygame.event.get():
         if ev.type==pygame.QUIT:running=False
+        elif ev.type==pygame.VIDEORESIZE:
+            # Keep the raytraced view full-window while allowing user resizing.
+            screen=pygame.display.set_mode((max(MIN_WINDOW_WIDTH,ev.w),max(MIN_WINDOW_HEIGHT,ev.h)),pygame.RESIZABLE)
         if state=='menu':
             if ev.type==pygame.KEYDOWN:
                 if ev.key==pygame.K_UP:selected=(selected-1)%len(levels)
@@ -46,67 +58,95 @@ while running:
                 elif ev.key==pygame.K_ESCAPE:state='menu'
         else:
             if ev.type==pygame.KEYDOWN:
-                if ev.key==pygame.K_SPACE:player.dash()
-                elif ev.key==pygame.K_1:fire(False)
-                elif ev.key==pygame.K_2:fire(True)
+                if ev.key==pygame.K_SPACE and has_ammo(0) and has_ammo(1):
+                    player.dash()
+                    fire("dash")
+                # Number keys select a weapon; firing is always left mouse button.
+                elif ev.key==pygame.K_1: selected_weapon=0
+                elif ev.key==pygame.K_2:selected_weapon=1
                 elif ev.key==pygame.K_r and reload_timer<=0:reload_timer=1.5
             if ev.type==pygame.MOUSEBUTTONDOWN:
-                if ev.button==1:fire(False)
-                elif ev.button==3:fire(True)
+                if ev.button==1:fire(selected_weapon)
     if state=='menu':menu(screen,selected,levels);pygame.display.flip();continue
     if state=='play':
-        player.update(dt,walls)
+        player.update(dt,walls, enemies)
+        # Advance the first-person rectangle bob only while the player moves or dashes.
+        if abs(player.speed) > 0 or player.dash_left > 0: viewmodel_phase += dt * 9
         for i in range(2):fire_cd[i]=max(0,fire_cd[i]-dt)
         if reload_timer>0:
             reload_timer-=dt
             if reload_timer<=0:ammo=[12,4]
-        for e in enemies:e.update(dt,player,walls,pathfinder)
+        for e in enemies:e.update(dt,player,walls,pathfinder,enemies)
         for p in projectiles:
             effect=p.update(dt,walls,enemies)
-            if effect: explosions.append(Explosion(effect[1],effect[2]))
+            if effect:
+                if effect[0]=='explosion':
+                    explosions.append(Explosion(effect[1],effect[2]))
+                elif effect[0]=='shrapnel':
+                    for i in range(10):
+                        a=math.tau*i/10+__import__('random').uniform(-.45,.45)
+                        shrapnel.append(Shrapnel(effect[1],effect[2],a))
         projectiles=[p for p in projectiles if p.alive]
+        for piece in shrapnel:piece.update(dt,walls,enemies)
+        shrapnel=[piece for piece in shrapnel if piece.alive]
         for x in explosions:x.update(dt,enemies,player,walls)
         explosions=[x for x in explosions if x.alive]
         if player.health<=0:state='dead'
         elif not any(e.alive for e in enemies):state='complete'
-    screen.fill((10,10,16)); pygame.draw.rect(screen,(18,20,28),(0,0,VIEW_W,500));
-    for w in walls:
-        w.draw(screen)
+    screen.fill((10,10,16))
+    # The former left-hand top-down map is intentionally omitted: raytracing fills the window.
+    ray=Raycaster();ray.cast(player,walls);ray.draw_3d(screen)
+    _, view_height = screen.get_size()
+    # 3D view: render enemies, projectiles, shrapnel and explosions as perspective sprites.
     for e in enemies:
-        e.draw(screen)
+        if not e.alive: continue
+        proj=ray.project(player,e.pos,e.radius,1.0)
+        if proj:
+            x,d,size=proj
+            if d <= ray.wall_depth_at(x)+max(2,size*0.015):
+                r=max(2,int(size/2))
+                pygame.draw.circle(screen,RED,(int(x),view_height//2),r)
+                # simple highlight makes the sphere read as 3D
+                pygame.draw.circle(screen,(255,150,150),(int(x-r*.35),int(view_height/2-r*.35)),max(1,int(r*.22)))
+                bar=max(8,int(size*.9))
+                pygame.draw.rect(screen,(60,0,0),(int(x-bar/2),view_height//2-r-8,bar,4))
+                pygame.draw.rect(screen,GREEN,(int(x-bar/2),view_height//2-r-8,int(bar*e.health/e.max_health),4))
+
     for p in projectiles:
-        p.draw(screen)
-    for x in explosions:
-        x.draw(screen)
+        if not p.alive: continue
+        proj=ray.project(player,p.pos,p.radius,0.55)
+        if proj:
+            x,d,size=proj
+            if d <= ray.wall_depth_at(x)+2:
+                r=max(2,int(size/2))
+                pygame.draw.circle(screen,ORANGE,(int(x),view_height//2),r)
+                pygame.draw.circle(screen,YELLOW,(int(x-r*.25),int(view_height/2-r*.25)),max(1,int(r*.35)))
 
-    player.draw(screen)
+    for piece in shrapnel:
+        if not piece.alive: continue
+        proj=ray.project(player,piece.pos,4,0.6)
+        if proj:
+            x,d,size=proj
+            if d <= ray.wall_depth_at(x)+2:
+                r=max(1,int(size/2))
+                pygame.draw.circle(screen,YELLOW,(int(x),view_height//2),r)
 
-    # Raycasting
-    ray=Raycaster()
-    ray.cast(player, walls)
-    ray.draw_3d(screen)
+    for xpl in explosions:
+        if not xpl.alive: continue
+        proj=ray.project(player,(xpl.x,xpl.y),xpl.radius,1.0)
+        if proj:
+            x,d,size=proj
+            if d <= ray.wall_depth_at(x)+2:
+                r=max(2,int(size/2))
+                pygame.draw.circle(screen,ORANGE,(int(x),view_height//2),r, max(2,int(r*.10)))
+                pygame.draw.circle(screen,YELLOW,(int(x),view_height//2),max(1,int(r*.55)),max(1,int(r*.06)))
 
-    # Right side is the 3D view; redraw its floor/ceiling first would require separate surface, so overlay is intentionally simple.
-    pygame.draw.rect(screen,(12,12,18),(500,0,500,500));ray.draw_3d(screen)
-    for e in enemies:
-        if e.alive:
-            dx = e.x - player.x
-            dy = e.y - player.y
-            d = math.hypot(dx, dy)
-
-            a = (math.atan2(dy,dx)-player.angle+math.pi)%(2*math.pi)-math.pi
-            if abs(a)<FOV/2 and d>1 and (ray.dists[max(0,min(len(ray.dists)-1,int((a+FOV/2)/FOV*len(ray.dists))))] or 9999)>d:
-                x = 500+(a/FOV+.5)*500;size=max(10,min(180,650/d))
-                pygame.draw.circle(screen,RED,(int(x),300),int(size/2))
-    hud(screen,level_idx,sum(e.alive for e in enemies),player,ammo,reload_timer>0)
-    if state=='dead':
-        pygame.draw.rect(screen,(80,0,0),(0,0,1000,600),width=0)
-        text(screen,'YOU DIED',(500,240),60,WHITE)
-        text(screen,'R: RESTART   ENTER: MENU',(500,330),24,WHITE)
-    elif state=='complete':
-        text(screen,'LEVEL CLEAR',(500,240),55,YELLOW)
-        text(screen,'ENTER: NEXT LEVEL   ESC: MENU',(500,330),22,WHITE)
+    bob = math.sin(viewmodel_phase) * 12 if state == 'play' and (abs(player.speed) > 0 or player.dash_left > 0) else 0
+    viewmodel(screen, bob)
+    hud(screen,level_idx,sum(e.alive for e in enemies),player,ammo,reload_timer>0,selected_weapon)
+    view_width, view_height = screen.get_size()
+    if state=='dead':pygame.draw.rect(screen,(80,0,0),(0,0,view_width,view_height),width=0);text(screen,'YOU DIED',(view_width/2,view_height*.4),60,WHITE);text(screen,'R: RESTART   ENTER: MENU',(view_width/2,view_height*.55),24,WHITE)
+    elif state=='complete':text(screen,'LEVEL CLEAR',(view_width/2,view_height*.4),55,YELLOW);text(screen,'ENTER: NEXT LEVEL   ESC: MENU',(view_width/2,view_height*.55),22,WHITE)
     pygame.display.flip()
 
-pygame.quit()
-sys.exit()
+pygame.quit();sys.exit()

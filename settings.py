@@ -1,13 +1,18 @@
+# Default size for the resizable game window. The renderer uses the live window
+# dimensions, so players can resize it while the game is running.
 WIDTH, HEIGHT = 1000, 600
+MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT = 640, 400
 WORLD_W, WORLD_H = 500, 500
 VIEW_W = 500
 FPS = 60
 FOV = 1.15
 RAY_STEP = 0.004
 PLAYER_RADIUS = 7
-PLAYER_SPEED = 155
-DASH_SPEED = 560
+PLAYER_SPEED = 30
+PLAYER_FRICTION = 0.8
+DASH_SPEED = 1200
 DASH_TIME = 0.16
+DASH_DAMAGE = 100
 DASH_COOLDOWN = 1.0
 
 WHITE=(240,240,240); BLACK=(8,8,12); RED=(235,55,55); GREEN=(55,230,100)

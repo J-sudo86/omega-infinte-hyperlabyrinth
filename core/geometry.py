@@ -26,22 +26,27 @@ def line_of_sight(a, b, walls):
     return True
 
 
-def move_circle(pos, delta, radius, walls, is_noclip=False):
+def move_circle(pos, delta, radius, walls, is_permeable=False, enemies=[], uid=None):
     # Sub-step movement prevents tunnelling through thin walls.
     x, y = pos
     dist = math.hypot(*delta)
     steps = max(1, math.ceil(dist / 3.0))
     sx, sy = delta[0]/steps, delta[1]/steps
-
     for _ in range(steps):
         nx, ny = x+sx, y+sy
         blocked = False
-        if is_noclip:
-            x, y = nx, ny
-            continue
+        if is_permeable:
+            x, y = nx, ny # band-aid fix but functional
         for w in walls:
             if w.collides_circle((nx, ny), radius):
                 blocked = True; break
+        for e in enemies:
+            if id(e) == uid:
+                continue
+            if e.alive and math.hypot(x-e.x, y-e.y) < radius+e.radius:
+                blocked = True
+                break
+        
         if not blocked:
             x, y = nx, ny
     return x, y
