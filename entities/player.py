@@ -19,8 +19,8 @@ class Player:
         self.speed *= PLAYER_FRICTION
         if self.speed < 10:
             self.speed = 0
-        if self.speed > 115:
-            self.speed = 115
+        if self.speed > PLAYER_MAX_SPEED:
+            self.speed = PLAYER_MAX_SPEED
         dx = math.cos(self.angle) * self.speed * dt
         dy = math.sin(self.angle) * self.speed * dt
         if self.dash_left > 0:

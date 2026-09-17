@@ -1,19 +1,21 @@
 import math, pygame
 from core.geometry import move_circle, line_of_sight
 from settings import *
+import random
 
 
 class Enemy:
-    def __init__(self, x, y, hp=20, speed=65, attack_damage=10, radius=20):
+    def __init__(self, x, y, hp=20, speed=65, attack_damage=10, radius=20, coins_range=[1,5]):
         self.x=x; self.y=y; self.max_health=hp; self.health=hp; self.speed=speed; self.attack_damage=attack_damage
         self.radius=radius
+        self.coins=random.randint(coins_range[0], coins_range[1])
         self.alive=True; self.attack_cd=0; self.path=[]; self.path_timer=0
 
     @property
     def pos(self): return (self.x,self.y)
 
     def update(self,dt,player,walls,pathfinder,enemies):
-        if not self.alive:return
+        if not self.alive:return 1
         self.attack_cd=max(0,self.attack_cd-dt); self.path_timer-=dt
         d=math.hypot(player.x-self.x,player.y-self.y)
         if d<self.radius+16 and line_of_sight(self.pos,player.pos,walls):
